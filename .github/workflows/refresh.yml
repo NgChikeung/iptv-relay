@@ -1,0 +1,61 @@
+name: refresh-sources
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'   # 每 6 小时（UTC），错开整点
+  workflow_dispatch: {}       # 允许手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch sources
+        env:
+          JACK_URL: ${{ secrets.JACK_URL }}
+          S852_URL: ${{ secrets.S852_URL }}
+        run: |
+          mkdir -p sources
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+
+          if curl -fsSL --max-time 30 -A "$UA" \
+               -H "Referer: https://php.946985.filegear-sg.me/" \
+               "$JACK_URL" -o sources/jack.m3u.tmp; then
+            if head -c 7 sources/jack.m3u.tmp | grep -q "#EXTM3U"; then
+              mv sources/jack.m3u.tmp sources/jack.m3u
+              echo "jack: 更新成功"
+            else
+              rm -f sources/jack.m3u.tmp; echo "jack: 内容不是有效 m3u，保留旧版"
+            fi
+          else
+            rm -f sources/jack.m3u.tmp; echo "jack: 拉取失败，保留旧版"
+          fi
+
+          if curl -fsSL --max-time 30 -A "$UA" \
+               -H "Referer: https://iptv.852851.xyz/" \
+               "$S852_URL" -o sources/852.m3u.tmp; then
+            if head -c 7 sources/852.m3u.tmp | grep -q "#EXTM3U"; then
+              mv sources/852.m3u.tmp sources/852.m3u
+              echo "852: 更新成功"
+            else
+              rm -f sources/852.m3u.tmp; echo "852: 内容不是有效 m3u，保留旧版"
+            fi
+          else
+            rm -f sources/852.m3u.tmp; echo "852: 拉取失败，保留旧版"
+          fi
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add sources/ -A
+          if git diff --cached --quiet; then
+            echo "内容无变化，跳过提交"
+          else
+            git commit -m "refresh sources $(date -u '+%F %T UTC')"
+            git push
+          fi
